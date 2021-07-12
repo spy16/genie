@@ -1,4 +1,4 @@
-package portal
+package genie
 
 import (
 	"bufio"
@@ -14,39 +14,49 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
-
-	"github.com/spy16/genie"
 )
 
 var (
 	//go:embed index.html
 	indexHTML string
 
+	//go:embed favicon.png
+	favicon []byte
+
 	indexTpl = template.Must(template.New("index").Parse(indexHTML))
 )
 
-// New returns a new web portal handler.
-func New(q genie.Queue) http.Handler {
+// Router returns a new web portal handler.
+func Router(q Queue) http.Handler {
 	r := mux.NewRouter()
 	r.Handle("/", handleIndexGet(q)).Methods(http.MethodGet)
 	r.Handle("/", handleUpload(q)).Methods(http.MethodPost)
+	r.Handle("/favicon.png", handleFaviconGet())
 	return r
 }
 
-func handleIndexGet(q genie.Queue) http.HandlerFunc {
+func handleFaviconGet() http.HandlerFunc {
+	return func(wr http.ResponseWriter, req *http.Request) {
+		wr.Header().Set("Content-type", "image/png")
+		_, _ = wr.Write(favicon)
+	}
+}
+
+func handleIndexGet(q Queue) http.HandlerFunc {
 	return func(wr http.ResponseWriter, req *http.Request) {
 		d := map[string]interface{}{}
+		stats, err := q.Stats()
+		if err != nil {
+			d["error"] = fmt.Sprintf("stats unavailable: %v", err)
+		} else {
+			d["stats"] = doPercent(stats)
+		}
+		d["job_types"] = q.JobTypes()
+
 		if status := strings.TrimSpace(req.URL.Query().Get("status")); status != "" {
 			d["status"] = status
 		} else if errStr := strings.TrimSpace(req.URL.Query().Get("error")); errStr != "" {
 			d["error"] = errStr
-		} else {
-			stats, err := q.Stats()
-			if err != nil {
-				d["error"] = fmt.Sprintf("stats unavailable: %v", err)
-			} else {
-				d["stats"] = doPercent(stats)
-			}
 		}
 
 		if err := indexTpl.Execute(wr, d); err != nil {
@@ -55,7 +65,7 @@ func handleIndexGet(q genie.Queue) http.HandlerFunc {
 	}
 }
 
-func handleUpload(q genie.Queue) http.HandlerFunc {
+func handleUpload(q Queue) http.HandlerFunc {
 	return func(wr http.ResponseWriter, req *http.Request) {
 		if err := req.ParseMultipartForm(10 << 20); err != nil {
 			redirectErr(wr, req, err.Error())
@@ -73,10 +83,10 @@ func handleUpload(q genie.Queue) http.HandlerFunc {
 		}
 		defer file.Close()
 
-		var items []genie.Item
+		var items []Item
 		sc := bufio.NewScanner(file)
 		for line := 0; sc.Scan(); line++ {
-			items = append(items, genie.Item{
+			items = append(items, Item{
 				ID:      generateID(fmt.Sprintf("%s_%d", header.Filename, line)),
 				Type:    req.FormValue("jobType"),
 				Payload: sc.Text(),
@@ -108,7 +118,7 @@ func generateID(s string) string {
 	return hex.EncodeToString(sha[:10])
 }
 
-func doPercent(stats []genie.Stats) []percentStat {
+func doPercent(stats []Stats) []percentStat {
 	result := make([]percentStat, len(stats), len(stats))
 	for i, stat := range stats {
 		result[i] = percentStat{

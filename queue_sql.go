@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -13,14 +14,38 @@ import (
 
 )
 
+func newSQLQueue(u *url.URL, types []string) (*sqlQueue, error) {
+	db, err := sqlx.Connect("sqlite3", u.Host)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := db.Exec(schema); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
+	return &sqlQueue{
+		db:    db,
+		file:  u.Host,
+		types: types,
+		opts: Options{
+			PollInt:      1 * time.Second,
+			FnTimeout:    1 * time.Second,
+			MaxAttempts:  1,
+			RetryBackoff: 10 * time.Second,
+		},
+	}, nil
+}
+
 // sqlQueue implements a simple disk-backed queue using SQLite3 database.
 // A single table is used to store the queue items with their insertion
 // timestamp defining the execution order.
 type sqlQueue struct {
-	db       *sqlx.DB
-	file     string
-	opts     Options
-	handlers map[string]ApplyFn
+	db    *sqlx.DB
+	file  string
+	opts  Options
+	types []string
 }
 
 // Push enqueues all items into the queue with pending status.
@@ -64,12 +89,7 @@ func (q *sqlQueue) Push(ctx context.Context, items ...Item) error {
 // ErrSkipped to move to DONE, FAILED or SKIPPED terminal statuses directly. If
 // fn returns any other error, it will remain in PENDING state and will be retried
 // after sometime.
-func (q *sqlQueue) Run(ctx context.Context, fnMap map[string]ApplyFn) error {
-	var supported []string
-	for jobType := range fnMap {
-		supported = append(supported, jobType)
-	}
-
+func (q *sqlQueue) Run(ctx context.Context, fn HandlerFn) error {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 
@@ -81,7 +101,7 @@ func (q *sqlQueue) Run(ctx context.Context, fnMap map[string]ApplyFn) error {
 		case <-timer.C:
 			timer.Reset(q.opts.PollInt)
 
-			records, err := q.getBatch(ctx, supported)
+			records, err := q.getBatch(ctx, q.types)
 			if err != nil {
 				log.Printf("failed to read next batch: %v", err)
 			} else if len(records) == 0 {
@@ -89,7 +109,7 @@ func (q *sqlQueue) Run(ctx context.Context, fnMap map[string]ApplyFn) error {
 			}
 
 			for _, rec := range records {
-				if err := q.processRecord(ctx, rec, fnMap[rec.Type]); err != nil {
+				if err := q.processRecord(ctx, rec, fn); err != nil {
 					log.Printf("failed to process '%s': %v", rec.ID, err)
 				}
 			}
@@ -114,6 +134,8 @@ func (q *sqlQueue) Stats() ([]Stats, error) {
 	return stats, nil
 }
 
+func (q *sqlQueue) JobTypes() []string { return q.types }
+
 func (q *sqlQueue) getBatch(ctx context.Context, supported []string) ([]sqlQueueItem, error) {
 	const selectQuery = `SELECT * FROM queue
 		WHERE status='PENDING' AND  next_attempt_at <= ? AND type IN (?)
@@ -133,7 +155,7 @@ func (q *sqlQueue) getBatch(ctx context.Context, supported []string) ([]sqlQueue
 	return records, nil
 }
 
-func (q *sqlQueue) processRecord(ctx context.Context, rec sqlQueueItem, fn ApplyFn) error {
+func (q *sqlQueue) processRecord(ctx context.Context, rec sqlQueueItem, fn HandlerFn) error {
 	fnCtx, cancel := context.WithTimeout(ctx, q.opts.FnTimeout)
 	defer cancel()
 

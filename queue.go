@@ -15,11 +15,11 @@ const (
 )
 
 var (
-	// ErrSkip can be returned by ApplyFn to indicate that the queued item
+	// ErrSkip can be returned by HandlerFn to indicate that the queued item
 	// be skipped immediately.
 	ErrSkip = errors.New("skip")
 
-	// ErrFail can be returned by ApplyFn to indicate no further retries
+	// ErrFail can be returned by HandlerFn to indicate no further retries
 	// should be attempted.
 	ErrFail = errors.New("failed")
 )
@@ -27,8 +27,9 @@ var (
 // Queue represents a priority or delay queue.
 type Queue interface {
 	Push(ctx context.Context, items ...Item) error
-	Run(ctx context.Context, fnMap map[string]ApplyFn) error
+	Run(ctx context.Context, handler HandlerFn) error
 	Stats() ([]Stats, error)
+	JobTypes() []string
 	Close() error
 }
 
@@ -40,9 +41,9 @@ type Options struct {
 	RetryBackoff time.Duration
 }
 
-// ApplyFn is invoked by the queue instance when an item is available for
+// HandlerFn is invoked by the queue instance when an item is available for
 // execution.
-type ApplyFn func(ctx context.Context, item Item) ([]byte, error)
+type HandlerFn func(ctx context.Context, item Item) ([]byte, error)
 
 // Item represents an item on the queue.
 type Item struct {

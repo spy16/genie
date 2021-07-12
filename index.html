@@ -46,7 +46,9 @@
             <div class="row">
                 <div class="mb-3">
                     <select class="form-select form-select-sm" aria-label=".form-select-sm example" name="jobType">
-                        <option value="WebHook">WebHook</option>
+                        {{range .job_types}}
+                        <option value="{{.}}">{{.}}</option>
+                        {{end}}
                     </select>
                     <div id="jobTypeHelp" class="form-text">
                         Execution logic may be different based on type.
