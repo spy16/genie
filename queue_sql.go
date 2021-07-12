@@ -45,7 +45,7 @@ func (q *sqlQueue) Push(ctx context.Context, items ...Item) error {
 			MaxAttempts:   maxAttempts,
 			CreatedAt:     t,
 			UpdatedAt:     t,
-			NextAttemptAt: t,
+			NextAttemptAt: item.NextAttempt.UTC(),
 		}
 	}
 
@@ -199,5 +199,6 @@ func (rec sqlQueueItem) Item() Item {
 		Payload:     rec.Payload,
 		Attempt:     rec.Attempts,
 		MaxAttempts: rec.MaxAttempts,
+		NextAttempt: rec.NextAttemptAt.Local(),
 	}
 }

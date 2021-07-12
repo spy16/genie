@@ -90,11 +90,12 @@ type ApplyFn func(ctx context.Context, item Item) error
 
 // Item represents an item on the queue.
 type Item struct {
-	ID          string `json:"id"`
-	Type        string `json:"type"`
-	Payload     string `json:"payload"`
-	Attempt     int    `json:"attempt"`
-	MaxAttempts int    `json:"max_attempts"`
+	ID          string    `json:"id"`
+	Type        string    `json:"type"`
+	Payload     string    `json:"payload"`
+	Attempt     int       `json:"attempt"`
+	MaxAttempts int       `json:"max_attempts"`
+	NextAttempt time.Time `json:"next_attempt"`
 }
 
 // Stats represents queue status break down by type.
