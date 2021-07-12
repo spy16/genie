@@ -27,7 +27,7 @@ var (
 // Queue represents a priority or delay queue.
 type Queue interface {
 	Push(ctx context.Context, items ...Item) error
-	Run(ctx context.Context, handler HandlerFn) error
+	Run(ctx context.Context) error
 	Stats() ([]Stats, error)
 	JobTypes() []string
 	Close() error
@@ -42,8 +42,17 @@ type Options struct {
 }
 
 // HandlerFn is invoked by the queue instance when an item is available for
-// execution.
+// execution or for validation when items are being enqueued.
+type Handler interface {
+	Handle(ctx context.Context, item Item) ([]byte, error)
+	Sanitize(ctx context.Context, item *Item) error
+}
+
+// HandlerFn implements Handler using Go native func value.
 type HandlerFn func(ctx context.Context, item Item) ([]byte, error)
+
+func (h HandlerFn) Handle(ctx context.Context, item Item) ([]byte, error) { return h(ctx, item) }
+func (h HandlerFn) Sanitize(_ context.Context, _ *Item) error             { return nil }
 
 // Item represents an item on the queue.
 type Item struct {

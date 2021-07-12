@@ -14,7 +14,7 @@ import (
 
 )
 
-func newSQLQueue(u *url.URL, types []string) (*sqlQueue, error) {
+func newSQLQueue(u *url.URL, types []string, h Handler) (*sqlQueue, error) {
 	db, err := sqlx.Connect("sqlite3", u.Host)
 	if err != nil {
 		return nil, err
@@ -26,9 +26,10 @@ func newSQLQueue(u *url.URL, types []string) (*sqlQueue, error) {
 	}
 
 	return &sqlQueue{
-		db:    db,
-		file:  u.Host,
-		types: types,
+		db:     db,
+		file:   u.Host,
+		types:  types,
+		handle: h,
 		opts: Options{
 			PollInt:      1 * time.Second,
 			FnTimeout:    1 * time.Second,
@@ -42,10 +43,11 @@ func newSQLQueue(u *url.URL, types []string) (*sqlQueue, error) {
 // A single table is used to store the queue items with their insertion
 // timestamp defining the execution order.
 type sqlQueue struct {
-	db    *sqlx.DB
-	file  string
-	opts  Options
-	types []string
+	db     *sqlx.DB
+	file   string
+	opts   Options
+	types  []string
+	handle Handler
 }
 
 // Push enqueues all items into the queue with pending status.
@@ -58,6 +60,10 @@ func (q *sqlQueue) Push(ctx context.Context, items ...Item) error {
 
 	qItems := make([]sqlQueueItem, len(items), len(items))
 	for i, item := range items {
+		if err := q.handle.Sanitize(ctx, &item); err != nil {
+			return err
+		}
+
 		// choose the maximum of default max attempts or item limit.
 		maxAttempts := q.opts.MaxAttempts
 		if item.MaxAttempts > 0 && item.MaxAttempts < maxAttempts {
@@ -89,7 +95,7 @@ func (q *sqlQueue) Push(ctx context.Context, items ...Item) error {
 // ErrSkipped to move to DONE, FAILED or SKIPPED terminal statuses directly. If
 // fn returns any other error, it will remain in PENDING state and will be retried
 // after sometime.
-func (q *sqlQueue) Run(ctx context.Context, fn HandlerFn) error {
+func (q *sqlQueue) Run(ctx context.Context) error {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 
@@ -109,7 +115,7 @@ func (q *sqlQueue) Run(ctx context.Context, fn HandlerFn) error {
 			}
 
 			for _, rec := range records {
-				if err := q.processRecord(ctx, rec, fn); err != nil {
+				if err := q.processRecord(ctx, rec, q.handle); err != nil {
 					log.Printf("failed to process '%s': %v", rec.ID, err)
 				}
 			}
@@ -155,11 +161,11 @@ func (q *sqlQueue) getBatch(ctx context.Context, supported []string) ([]sqlQueue
 	return records, nil
 }
 
-func (q *sqlQueue) processRecord(ctx context.Context, rec sqlQueueItem, fn HandlerFn) error {
+func (q *sqlQueue) processRecord(ctx context.Context, rec sqlQueueItem, h Handler) error {
 	fnCtx, cancel := context.WithTimeout(ctx, q.opts.FnTimeout)
 	defer cancel()
 
-	result, fnErr := fn(fnCtx, rec.Item())
+	result, fnErr := h.Handle(fnCtx, rec.Item())
 	rec.Attempts++
 
 	if fnErr == nil {

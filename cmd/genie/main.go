@@ -21,7 +21,7 @@ var (
 func main() {
 	flag.Parse()
 
-	q, err := genie.Open(*queueSpec, strings.Split(*jobTypes, ","))
+	q, err := genie.Open(*queueSpec, strings.Split(*jobTypes, ","), genie.HandlerFn(logFn))
 	if err != nil {
 		fmt.Printf("failed to open file: %v\n", err)
 		os.Exit(1)
@@ -29,7 +29,7 @@ func main() {
 	defer q.Close()
 
 	go func() {
-		if err := q.Run(context.Background(), logFn); err != nil {
+		if err := q.Run(context.Background()); err != nil {
 			log.Printf("queue.Run() exited: %v", err)
 		}
 	}()
