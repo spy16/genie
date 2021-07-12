@@ -30,7 +30,7 @@ var (
 
 // Open opens a queue based on the spec and returns it. If the keys/tables
 // required for the queue are not present, they will be created as needed.
-func Open(queueSpec string, opts *Options) (Queue, error) {
+func Open(queueSpec string, opts *Options) (*sqlQueue, error) {
 	u, err := url.Parse(queueSpec)
 	if err != nil {
 		return nil, err
@@ -71,7 +71,7 @@ func Open(queueSpec string, opts *Options) (Queue, error) {
 // Queue represents a priority or delay queue.
 type Queue interface {
 	Push(ctx context.Context, items ...Item) error
-	Run(ctx context.Context, fn ApplyFn) error
+	Run(ctx context.Context, fnMap map[string]ApplyFn) error
 	Stats() ([]Stats, error)
 	Close() error
 }
@@ -86,20 +86,23 @@ type Options struct {
 
 // ApplyFn is invoked by the queue instance when an item is available for
 // execution.
-type ApplyFn func(ctx context.Context, item Item) error
+type ApplyFn func(ctx context.Context, item Item) ([]byte, error)
 
 // Item represents an item on the queue.
 type Item struct {
 	ID          string    `json:"id"`
 	Type        string    `json:"type"`
 	Payload     string    `json:"payload"`
+	GroupID     string    `json:"group_id"`
 	Attempt     int       `json:"attempt"`
 	MaxAttempts int       `json:"max_attempts"`
 	NextAttempt time.Time `json:"next_attempt"`
+	Result      string    `json:"result"`
 }
 
 // Stats represents queue status break down by type.
 type Stats struct {
+	GroupID string `json:"group_id" db:"group_id"`
 	Type    string `json:"type"`
 	Total   int    `json:"total"`
 	Done    int    `json:"done"`

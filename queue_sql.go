@@ -17,15 +17,17 @@ import (
 // A single table is used to store the queue items with their insertion
 // timestamp defining the execution order.
 type sqlQueue struct {
-	db   *sqlx.DB
-	file string
-	opts Options
+	db       *sqlx.DB
+	file     string
+	opts     Options
+	handlers map[string]ApplyFn
 }
 
 // Push enqueues all items into the queue with pending status.
 func (q *sqlQueue) Push(ctx context.Context, items ...Item) error {
-	const insertQuery = `INSERT INTO queue (id, type, status, created_at, updated_at, payload, next_attempt_at)
-		VALUES (:id, :type, :status, :created_at, :updated_at, :payload, :next_attempt_at)`
+	const insertQuery = `
+		INSERT INTO queue (id, type, group_id, status, created_at, updated_at, payload, max_attempts, next_attempt_at)
+		VALUES (:id, :type, :group_id, :status, :created_at, :updated_at, :payload, :max_attempts, :next_attempt_at)`
 
 	t := time.Now().UTC()
 
@@ -36,12 +38,16 @@ func (q *sqlQueue) Push(ctx context.Context, items ...Item) error {
 		if item.MaxAttempts > 0 && item.MaxAttempts < maxAttempts {
 			maxAttempts = item.MaxAttempts
 		}
+		if maxAttempts <= 0 {
+			maxAttempts = 1
+		}
 
 		qItems[i] = sqlQueueItem{
 			ID:            item.ID,
 			Type:          item.Type,
 			Status:        StatusPending,
 			Payload:       item.Payload,
+			GroupID:       item.GroupID,
 			MaxAttempts:   maxAttempts,
 			CreatedAt:     t,
 			UpdatedAt:     t,
@@ -58,7 +64,12 @@ func (q *sqlQueue) Push(ctx context.Context, items ...Item) error {
 // ErrSkipped to move to DONE, FAILED or SKIPPED terminal statuses directly. If
 // fn returns any other error, it will remain in PENDING state and will be retried
 // after sometime.
-func (q *sqlQueue) Run(ctx context.Context, fn ApplyFn) error {
+func (q *sqlQueue) Run(ctx context.Context, fnMap map[string]ApplyFn) error {
+	var supported []string
+	for jobType := range fnMap {
+		supported = append(supported, jobType)
+	}
+
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 
@@ -70,7 +81,7 @@ func (q *sqlQueue) Run(ctx context.Context, fn ApplyFn) error {
 		case <-timer.C:
 			timer.Reset(q.opts.PollInt)
 
-			records, err := q.getBatch(ctx)
+			records, err := q.getBatch(ctx, supported)
 			if err != nil {
 				log.Printf("failed to read next batch: %v", err)
 			} else if len(records) == 0 {
@@ -78,7 +89,7 @@ func (q *sqlQueue) Run(ctx context.Context, fn ApplyFn) error {
 			}
 
 			for _, rec := range records {
-				if err := q.processRecord(ctx, rec, fn); err != nil {
+				if err := q.processRecord(ctx, rec, fnMap[rec.Type]); err != nil {
 					log.Printf("failed to process '%s': %v", rec.ID, err)
 				}
 			}
@@ -88,14 +99,14 @@ func (q *sqlQueue) Run(ctx context.Context, fn ApplyFn) error {
 
 // Stats returns entire queue statistics broken down by type.
 func (q *sqlQueue) Stats() ([]Stats, error) {
-	const query = `SELECT type,
+	const query = `SELECT type, group_id, 
 	       count(*)                                       AS total,
 	       count(case when status = 'DONE' then 1 end)    AS done,
 	       count(case when status = 'PENDING' then 1 end) AS pending,
 	       count(case when status = 'SKIPPED' then 1 end) AS skipped,
 	       count(case when status = 'FAILED' then 1 end)  AS failed
 	FROM queue
-	GROUP BY type;`
+	GROUP BY type, group_id;`
 	var stats []Stats
 	if err := q.db.Select(&stats, query); err != nil {
 		return nil, err
@@ -103,14 +114,19 @@ func (q *sqlQueue) Stats() ([]Stats, error) {
 	return stats, nil
 }
 
-func (q *sqlQueue) getBatch(ctx context.Context) ([]sqlQueueItem, error) {
+func (q *sqlQueue) getBatch(ctx context.Context, supported []string) ([]sqlQueueItem, error) {
 	const selectQuery = `SELECT * FROM queue
-		WHERE status='PENDING' AND  next_attempt_at <= $1 
+		WHERE status='PENDING' AND  next_attempt_at <= ? AND type IN (?)
 		ORDER BY next_attempt_at
 		LIMIT 10;`
 
+	query, args, err := sqlx.In(selectQuery, time.Now().UTC(), supported)
+	if err != nil {
+		return nil, err
+	}
+
 	var records []sqlQueueItem
-	err := q.db.SelectContext(ctx, &records, selectQuery, time.Now().UTC())
+	err = q.db.SelectContext(ctx, &records, query, args...)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
@@ -121,11 +137,15 @@ func (q *sqlQueue) processRecord(ctx context.Context, rec sqlQueueItem, fn Apply
 	fnCtx, cancel := context.WithTimeout(ctx, q.opts.FnTimeout)
 	defer cancel()
 
-	fnErr := fn(fnCtx, rec.Item())
+	result, fnErr := fn(fnCtx, rec.Item())
 	rec.Attempts++
 
 	if fnErr == nil {
 		rec.Status = StatusDone
+		rec.Result = sql.NullString{
+			Valid:  true,
+			String: string(result),
+		}
 	} else {
 		if errors.Is(fnErr, ErrFail) || rec.Attempts >= rec.MaxAttempts {
 			rec.Status = StatusFailed
@@ -147,7 +167,8 @@ func (q *sqlQueue) processRecord(ctx context.Context, rec sqlQueueItem, fn Apply
 		    last_error=:last_error, 
 		    next_attempt_at=:next_attempt_at, 
 		    attempts=:attempts,
-		    updated_at=current_timestamp
+		    updated_at=current_timestamp,
+		    result=:result
 		WHERE id=:id`
 	_, err := q.db.NamedExecContext(ctx, updateQuery, rec)
 	return err
@@ -161,30 +182,35 @@ const schema = `
 	CREATE TABLE IF NOT EXISTS queue (
 		id TEXT PRIMARY KEY,
 		type TEXT NOT NULL,
+		group_id TEXT NOT NULL,
 		payload TEXT NOT NULL,
 		status TEXT NOT NULL,
 		max_attempts INTEGER NOT NULL,
 		attempts INTEGER NOT NULL DEFAULT 0,
 		next_attempt_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		result TEXT,
 		last_error TEXT,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
 	
 	CREATE INDEX IF NOT EXISTS index_type ON queue (type COLLATE binary);
+	CREATE INDEX IF NOT EXISTS index_group_id ON queue (type COLLATE binary);
 	CREATE INDEX IF NOT EXISTS index_next_attempt_at ON queue (next_attempt_at);
 `
 
 // sqlQueueItem should always match the above schema.
 type sqlQueueItem struct {
 	// Item attributes.
-	ID          string    `json:"id" db:"id"`
-	Type        string    `json:"type" db:"type"`
-	Status      string    `json:"status" db:"status"`
-	Payload     string    `json:"payload" db:"payload"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
-	MaxAttempts int       `json:"max_attempts" db:"max_attempts"`
+	ID          string         `json:"id" db:"id"`
+	Type        string         `json:"type" db:"type"`
+	Status      string         `json:"status" db:"status"`
+	GroupID     string         `json:"group_id" db:"group_id"`
+	Payload     string         `json:"payload" db:"payload"`
+	CreatedAt   time.Time      `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at" db:"updated_at"`
+	MaxAttempts int            `json:"max_attempts" db:"max_attempts"`
+	Result      sql.NullString `json:"result" db:"result"`
 
 	// Execution info.
 	Attempts      int            `json:"attempts" db:"attempts"`
@@ -196,7 +222,9 @@ func (rec sqlQueueItem) Item() Item {
 	return Item{
 		ID:          rec.ID,
 		Type:        rec.Type,
+		Result:      rec.Result.String,
 		Payload:     rec.Payload,
+		GroupID:     rec.GroupID,
 		Attempt:     rec.Attempts,
 		MaxAttempts: rec.MaxAttempts,
 		NextAttempt: rec.NextAttemptAt.Local(),

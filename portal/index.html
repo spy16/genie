@@ -1,88 +1,119 @@
 <!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport"
-          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="ie=edge">
-    <title>Genie - Bonus XP for GoClub Users</title>
-    <style>
-        .form {
-            width: 500px;
-            margin: 0 auto;
-            border: 1px solid black;
-            padding: 5px;
-        }
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
 
-        .form label {
-            width: 100%;
-        }
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet"
+          integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
 
-        .form .submit {
-            margin: 0 auto;
-        }
-
-        .file-in {
-            border: 1px dashed gray;
-        }
-
-        .error {
-            color: red;
-        }
-    </style>
+    <link rel="icon" type="image/png" href="favicon.png">
+    <title>Genie</title>
 </head>
 <body>
-<div class="form">
-    <a href="/">Genie - Bonus XP Issuer</a>
-    <hr>
-
-    <form id="form-new" enctype="multipart/form-data" action="/" method="POST">
-        <table>
-            <tr>
-                <td><label for="xp">Points to Issue:</label></td>
-                <td><label for="csvFile">Select a CSV file with user IDs in the first column.</label></td>
-            </tr>
-            <tr>
-                <td><input id="xp" type="number" name="xp" value="100"/></td>
-                <td><input id="csvFile" type="file" class="file-in"
-                           name="csvFile"
-                           accept=".csv"/></td>
-            </tr>
-        </table>
-        <br>
-        <button style="float: right;" type="submit" class="submit">Submit for issuance</button>
-    </form>
+<div class="container" style="width: 800px">
+    <nav class="navbar navbar-dark bg-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <img src="favicon.png" alt="" width="30" height="30"
+                     class="d-inline-block align-text-top">
+                Genie
+            </a>
+        </div>
+    </nav>
     <br>
 
-    {{if .error}}
-    <hr>
-    <p class="error"><b>Error: </b>{{.error}}</p>
-    {{else if .status}}
-    <hr>
-    <p class="status">{{.status}}</p>
-    {{end}}
+    <div class="container">
+        <form method="post" enctype="multipart/form-data">
+            <div class="row">
+                <div class="mb-3">
+                    <label for="jobFile" class="form-label">Select a line-delimited file to enqueue multiple jobs at
+                        once.</label>
+                    <input class="form-control form-control-sm" id="jobFile" name="jobFile" type="file"
+                           accept="text/plain">
+                    <div id="jobFileHelp" class="form-text">
+                        <ul>
+                            <li>Some example file types are CSV, line-delimited JSON file, etc.</li>
+                            <li>Each line will be considered as payload for a job</li>
+                            <li>Line index will be used to generate id as <span class="code">{filename}_{lineno}</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="mb-3">
+                    <select class="form-select form-select-sm" aria-label=".form-select-sm example" name="jobType">
+                        <option value="WebHook">WebHook</option>
+                    </select>
+                    <div id="jobTypeHelp" class="form-text">
+                        Execution logic may be different based on type.
+                    </div>
+                </div>
+            </div>
+
+            {{if .error}}
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                {{.error}}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+            {{else if .status}}
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                {{.status}}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+            {{end}}
+            <button type="submit" class="btn btn-success">Submit</button>
+
+        </form>
+    </div>
 
     <hr>
-    <table style="width: 100%; border: 1px solid black;">
+    <p>Note: Refresh the page to see progress updates.</p>
+    <table class="table table-hover">
+        <thead>
         <tr>
-            <td>Upload Name</td>
-            <td>Total</td>
-            <td>Done</td>
-            <td>Pending</td>
-            <td>Failed</td>
-            <td>Skipped</td>
+            <th scope="col">Type</th>
+            <th scope="col">Group ID</th>
+            <th scope="col">Total Items</th>
+            <th scope="col">Progress</th>
         </tr>
+        </thead>
+        <tbody>
         {{range .stats}}
         <tr>
             <td>{{.Type}}</td>
+            <td>{{.GroupID}}</td>
             <td>{{.Total}}</td>
-            <td>{{.Done}}</td>
-            <td>{{.Pending}}</td>
-            <td>{{.Failed}}</td>
-            <td>{{.Skipped}}</td>
+            <td>
+                <div class="progress">
+                    <div class="progress-bar bg-success" role="progressbar" style="width: {{.Done}}%"
+                         aria-valuenow="{{.Done}}"
+                         aria-valuemin="0"
+                         aria-valuemax="{{.Total}}">{{.Done}}%
+                    </div>
+                    <div class="progress-bar bg-info" role="progressbar" style="width: {{.Skipped}}%"
+                         aria-valuenow="{{.Done}}"
+                         aria-valuemin="0"
+                         aria-valuemax="{{.Total}}">{{.Skipped}}%
+                    </div>
+                    <div class="progress-bar bg-danger" role="progressbar" style="width: {{.Failed}}%"
+                         aria-valuenow="{{.Done}}"
+                         aria-valuemin="0"
+                         aria-valuemax="{{.Total}}">{{.Failed}}%
+                    </div>
+                </div>
+            </td>
         </tr>
         {{end}}
+        </tbody>
     </table>
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-MrcW6ZMFYlzcLA8Nl+NtUVF0sA7MsXsP1UyJoMp4YLEuNSfAP+JcXn/tWtIaxVXM"
+        crossorigin="anonymous"></script>
 </body>
 </html>

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -27,10 +29,23 @@ func main() {
 	}
 	defer q.Close()
 
+	go func() {
+		if err := q.Run(context.Background(), handlers); err != nil {
+			log.Printf("queue.Run() exited: %v", err)
+		}
+	}()
+
 	log.Printf("starting server on http://%s...", *bindAddr)
 	if err := http.ListenAndServe(*bindAddr, portal.New(q)); err != nil {
 		log.Fatalf("portal exited with error: %v", err)
 	} else {
 		log.Println("portal exited gracefully")
 	}
+}
+
+var handlers = map[string]genie.ApplyFn{
+	"WebHook": func(ctx context.Context, item genie.Item) ([]byte, error) {
+		log.Printf("item: %v", item)
+		return []byte("foo"), errors.New("failed")
+	},
 }
