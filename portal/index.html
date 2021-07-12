@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Genie - Bonus XP for GoClub Users</title>
+    <style>
+        .form {
+            width: 500px;
+            margin: 0 auto;
+            border: 1px solid black;
+            padding: 5px;
+        }
+
+        .form label {
+            width: 100%;
+        }
+
+        .form .submit {
+            margin: 0 auto;
+        }
+
+        .file-in {
+            border: 1px dashed gray;
+        }
+
+        .error {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+<div class="form">
+    <a href="/">Genie - Bonus XP Issuer</a>
+    <hr>
+
+    <form id="form-new" enctype="multipart/form-data" action="/" method="POST">
+        <table>
+            <tr>
+                <td><label for="xp">Points to Issue:</label></td>
+                <td><label for="csvFile">Select a CSV file with user IDs in the first column.</label></td>
+            </tr>
+            <tr>
+                <td><input id="xp" type="number" name="xp" value="100"/></td>
+                <td><input id="csvFile" type="file" class="file-in"
+                           name="csvFile"
+                           accept=".csv"/></td>
+            </tr>
+        </table>
+        <br>
+        <button style="float: right;" type="submit" class="submit">Submit for issuance</button>
+    </form>
+    <br>
+
+    {{if .error}}
+    <hr>
+    <p class="error"><b>Error: </b>{{.error}}</p>
+    {{else if .status}}
+    <hr>
+    <p class="status">{{.status}}</p>
+    {{end}}
+
+    <hr>
+    <table style="width: 100%; border: 1px solid black;">
+        <tr>
+            <td>Upload Name</td>
+            <td>Total</td>
+            <td>Done</td>
+            <td>Pending</td>
+            <td>Failed</td>
+            <td>Skipped</td>
+        </tr>
+        {{range .stats}}
+        <tr>
+            <td>{{.Type}}</td>
+            <td>{{.Total}}</td>
+            <td>{{.Done}}</td>
+            <td>{{.Pending}}</td>
+            <td>{{.Failed}}</td>
+            <td>{{.Skipped}}</td>
+        </tr>
+        {{end}}
+    </table>
+</div>
+</body>
+</html>
