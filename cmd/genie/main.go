@@ -22,7 +22,7 @@ var (
 func main() {
 	flag.Parse()
 
-	q, err := genie.Open(*queueSpec, nil)
+	q, err := genie.Open(*queueSpec)
 	if err != nil {
 		fmt.Printf("failed to open file: %v\n", err)
 		os.Exit(1)
