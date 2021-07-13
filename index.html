@@ -91,22 +91,25 @@
             <td>{{.Total}}</td>
             <td>
                 <div class="progress">
-                    <div class="progress-bar bg-success" role="progressbar" style="width: {{.Done}}%"
+                    <div title="Done" class="progress-bar bg-success" role="progressbar" style="width: {{.Done}}%"
                          aria-valuenow="{{.Done}}"
                          aria-valuemin="0"
                          aria-valuemax="{{.Total}}">{{.Done}}%
                     </div>
-                    <div class="progress-bar bg-info" role="progressbar" style="width: {{.Skipped}}%"
+                    <div title="Skipped" class="progress-bar bg-info" role="progressbar" style="width: {{.Skipped}}%"
                          aria-valuenow="{{.Done}}"
                          aria-valuemin="0"
                          aria-valuemax="{{.Total}}">{{.Skipped}}%
                     </div>
-                    <div class="progress-bar bg-danger" role="progressbar" style="width: {{.Failed}}%"
+                    <div title="Failed" class="progress-bar bg-danger" role="progressbar" style="width: {{.Failed}}%"
                          aria-valuenow="{{.Done}}"
                          aria-valuemin="0"
                          aria-valuemax="{{.Total}}">{{.Failed}}%
                     </div>
                 </div>
+                {{if gt .Failed 0.0}}<a href="/download?status=FAILED&group_id={{.GroupID}}">Failed</a> /{{end}}
+                {{if gt .Skipped 0.0}}<a href="/download?status=SKIPPED&group_id={{.GroupID}}">Skipped</a> /{{end}}
+                {{if gt .Done 0.0}}<a href="/download?status=DONE&group_id={{.GroupID}}">Done</a>{{end}}
             </td>
         </tr>
         {{end}}
