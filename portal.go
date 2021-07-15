@@ -114,6 +114,7 @@ func downloadJobs(q Queue) http.Handler {
 			return
 		}
 
+		wr.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s_%s.csv", groupID, status))
 		wr.Header().Set("Content-type", "text/csv")
 		wr.WriteHeader(http.StatusOK)
 		if err := q.ForEach(req.Context(), groupID, status, func(ctx context.Context, item Item) error {
