@@ -2,6 +2,7 @@ package genie
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha1"
 	_ "embed"
 	"encoding/hex"
@@ -31,6 +32,7 @@ func Router(q Queue) http.Handler {
 	r := mux.NewRouter()
 	r.Handle("/", handleIndexGet(q)).Methods(http.MethodGet)
 	r.Handle("/", handleUpload(q)).Methods(http.MethodPost)
+	r.Handle("/download", downloadJobs(q)).Methods(http.MethodGet)
 	r.Handle("/favicon.png", handleFaviconGet())
 	return r
 }
@@ -101,6 +103,26 @@ func handleUpload(q Queue) http.HandlerFunc {
 
 		redirectMsg(wr, req, fmt.Sprintf("%d items queued successfully", len(items)))
 	}
+}
+
+func downloadJobs(q Queue) http.Handler {
+	return http.HandlerFunc(func(wr http.ResponseWriter, req *http.Request) {
+		groupID := strings.TrimSpace(req.URL.Query().Get("group_id"))
+		status := strings.ToUpper(strings.TrimSpace(req.URL.Query().Get("status")))
+		if groupID == "" {
+			http.Error(wr, "'group_id' query param must be specified", http.StatusBadRequest)
+			return
+		}
+
+		wr.Header().Set("Content-type", "text/csv")
+		wr.WriteHeader(http.StatusOK)
+		if err := q.ForEach(req.Context(), groupID, status, func(ctx context.Context, item Item) error {
+			_, err := wr.Write([]byte(item.Payload + "\n"))
+			return err
+		}); err != nil {
+			log.Printf("failed to iterate all: %v", err)
+		}
+	})
 }
 
 func redirectErr(wr http.ResponseWriter, req *http.Request, msg string) {

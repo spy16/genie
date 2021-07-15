@@ -140,6 +140,32 @@ func (q *sqlQueue) Stats() ([]Stats, error) {
 	return stats, nil
 }
 
+// ForEach enumerates all jobs of given type with given status and applies
+// fn to them. Stops if fn returns error or when all jobs are considered.
+func (q *sqlQueue) ForEach(ctx context.Context, groupID, status string, fn Fn) error {
+	const query = `SELECT * FROM queue WHERE group_id=$1 AND status=$2`
+
+	rows, err := q.db.QueryxContext(ctx, query, groupID, status)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+
+	var rec sqlQueueItem
+	for rows.Next() {
+		if err := rows.StructScan(&rec); err != nil {
+			return err
+		}
+		if err := fn(ctx, rec.Item()); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (q *sqlQueue) JobTypes() []string { return q.types }
 
 func (q *sqlQueue) getBatch(ctx context.Context, supported []string) ([]sqlQueueItem, error) {

@@ -26,6 +26,7 @@ var (
 
 // Queue represents a priority or delay queue.
 type Queue interface {
+	ForEach(ctx context.Context, groupID, status string, fn Fn) error
 	Push(ctx context.Context, items ...Item) error
 	Run(ctx context.Context) error
 	Stats() ([]Stats, error)
@@ -47,6 +48,8 @@ type Handler interface {
 	Handle(ctx context.Context, item Item) ([]byte, error)
 	Sanitize(ctx context.Context, item *Item) error
 }
+
+type Fn func(ctx context.Context, item Item) error
 
 // HandlerFn implements Handler using Go native func value.
 type HandlerFn func(ctx context.Context, item Item) ([]byte, error)
