@@ -28,9 +28,9 @@ var (
 )
 
 // Router returns a new web portal handler.
-func Router(q Queue) http.Handler {
+func Router(q Queue, customBanner ...string) http.Handler {
 	r := mux.NewRouter()
-	r.Handle("/", handleIndexGet(q)).Methods(http.MethodGet)
+	r.Handle("/", handleIndexGet(q, strings.Join(customBanner, "\n"))).Methods(http.MethodGet)
 	r.Handle("/", handleUpload(q)).Methods(http.MethodPost)
 	r.Handle("/download", downloadJobs(q)).Methods(http.MethodGet)
 	r.Handle("/favicon.png", handleFaviconGet())
@@ -44,9 +44,9 @@ func handleFaviconGet() http.HandlerFunc {
 	}
 }
 
-func handleIndexGet(q Queue) http.HandlerFunc {
+func handleIndexGet(q Queue, banner string) http.HandlerFunc {
 	return func(wr http.ResponseWriter, req *http.Request) {
-		d := map[string]interface{}{}
+		d := map[string]interface{}{"banner": banner}
 		stats, err := q.Stats()
 		if err != nil {
 			d["error"] = fmt.Sprintf("stats unavailable: %v", err)
