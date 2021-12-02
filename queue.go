@@ -42,7 +42,7 @@ type Options struct {
 	RetryBackoff time.Duration
 }
 
-// HandlerFn is invoked by the queue instance when an item is available for
+// Handler is invoked by the queue instance when an item is available for
 // execution or for validation when items are being enqueued.
 type Handler interface {
 	Handle(ctx context.Context, item Item) ([]byte, error)
