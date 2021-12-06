@@ -1,4 +1,4 @@
-all: tidy test
+all: tidy test build
 
 tidy:
 	@echo "Tidying up..."
@@ -10,4 +10,5 @@ test:
 
 build:
 	@echo "Running go build..."
-	@go build ./...
+	@mkdir -p ./bin
+	@go build -o bin/ ./...

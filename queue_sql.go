@@ -11,10 +11,9 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3" // sqlite3 driver
-
 )
 
-func newSQLQueue(u *url.URL, types []string, h Handler) (*sqlQueue, error) {
+func newSQLQueue(u *url.URL) (*sqlQueue, error) {
 	db, err := sqlx.Connect("sqlite3", u.Host)
 	if err != nil {
 		return nil, err
@@ -26,10 +25,8 @@ func newSQLQueue(u *url.URL, types []string, h Handler) (*sqlQueue, error) {
 	}
 
 	return &sqlQueue{
-		db:     db,
-		file:   u.Host,
-		types:  types,
-		handle: h,
+		db:   db,
+		file: u.Host,
 		opts: Options{
 			PollInt:      1 * time.Second,
 			FnTimeout:    1 * time.Second,
@@ -43,27 +40,20 @@ func newSQLQueue(u *url.URL, types []string, h Handler) (*sqlQueue, error) {
 // A single table is used to store the queue items with their insertion
 // timestamp defining the execution order.
 type sqlQueue struct {
-	db     *sqlx.DB
-	file   string
-	opts   Options
-	types  []string
-	handle Handler
+	db   *sqlx.DB
+	file string
+	opts Options
 }
 
 // Push enqueues all items into the queue with pending status.
 func (q *sqlQueue) Push(ctx context.Context, items ...Item) error {
-	const insertQuery = `
-		INSERT INTO queue (id, type, group_id, status, created_at, updated_at, payload, max_attempts, next_attempt_at)
+	const insertQuery = `INSERT INTO queue (id, type, group_id, status, created_at, updated_at, payload, max_attempts, next_attempt_at)
 		VALUES (:id, :type, :group_id, :status, :created_at, :updated_at, :payload, :max_attempts, :next_attempt_at)`
 
 	t := time.Now().UTC()
 
 	qItems := make([]sqlQueueItem, len(items), len(items))
 	for i, item := range items {
-		if err := q.handle.Sanitize(ctx, &item); err != nil {
-			return err
-		}
-
 		// choose the maximum of default max attempts or item limit.
 		maxAttempts := q.opts.MaxAttempts
 		if item.MaxAttempts > 0 && item.MaxAttempts < maxAttempts {
@@ -90,41 +80,24 @@ func (q *sqlQueue) Push(ctx context.Context, items ...Item) error {
 	return err
 }
 
-// Run starts the worker loop that fetches next item from the queue and applies
-// the given func. Runs until context is cancelled. fn can return nil, ErrFail,
-// ErrSkipped to move to DONE, FAILED or SKIPPED terminal statuses directly. If
-// fn returns any other error, it will remain in PENDING state and will be retried
-// after sometime.
-func (q *sqlQueue) Run(ctx context.Context) error {
-	timer := time.NewTimer(0)
-	defer timer.Stop()
+func (q *sqlQueue) Pop(ctx context.Context, types []string, h Handler) error {
+	records, err := q.getBatch(ctx, types)
+	if err != nil {
+		log.Printf("failed to read next batch: %v", err)
+	} else if len(records) == 0 {
+		return nil
+	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-
-		case <-timer.C:
-			timer.Reset(q.opts.PollInt)
-
-			records, err := q.getBatch(ctx, q.types)
-			if err != nil {
-				log.Printf("failed to read next batch: %v", err)
-			} else if len(records) == 0 {
-				continue
-			}
-
-			for _, rec := range records {
-				if err := q.processRecord(ctx, rec, q.handle); err != nil {
-					log.Printf("failed to process '%s': %v", rec.ID, err)
-				}
-			}
+	for _, rec := range records {
+		if err := q.processRecord(ctx, rec, h); err != nil {
+			log.Printf("failed to process '%s': %v", rec.ID, err)
 		}
 	}
+	return nil
 }
 
 // Stats returns entire queue statistics broken down by type.
-func (q *sqlQueue) Stats() ([]Stats, error) {
+func (q *sqlQueue) Stats() ([]GroupStat, error) {
 	const query = `SELECT type, group_id, 
 	       count(*)                                       AS total,
 	       count(case when status = 'DONE' then 1 end)    AS done,
@@ -133,7 +106,7 @@ func (q *sqlQueue) Stats() ([]Stats, error) {
 	       count(case when status = 'FAILED' then 1 end)  AS failed
 	FROM queue
 	GROUP BY type, group_id;`
-	var stats []Stats
+	var stats []GroupStat
 	if err := q.db.Select(&stats, query); err != nil {
 		return nil, err
 	}
@@ -166,8 +139,6 @@ func (q *sqlQueue) ForEach(ctx context.Context, groupID, status string, fn Fn) e
 	return nil
 }
 
-func (q *sqlQueue) JobTypes() []string { return q.types }
-
 func (q *sqlQueue) getBatch(ctx context.Context, supported []string) ([]sqlQueueItem, error) {
 	const selectQuery = `SELECT * FROM queue
 		WHERE status='PENDING' AND  next_attempt_at <= ? AND type IN (?)
@@ -191,7 +162,7 @@ func (q *sqlQueue) processRecord(ctx context.Context, rec sqlQueueItem, h Handle
 	fnCtx, cancel := context.WithTimeout(ctx, q.opts.FnTimeout)
 	defer cancel()
 
-	result, fnErr := h.Handle(fnCtx, rec.Item())
+	result, fnErr := h(fnCtx, rec.Item())
 	rec.Attempts++
 
 	if fnErr == nil {

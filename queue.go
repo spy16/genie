@@ -26,12 +26,10 @@ var (
 
 // Queue represents a priority or delay queue.
 type Queue interface {
-	ForEach(ctx context.Context, groupID, status string, fn Fn) error
+	Pop(ctx context.Context, types []string, h Handler) error
 	Push(ctx context.Context, items ...Item) error
-	Run(ctx context.Context) error
-	Stats() ([]Stats, error)
-	JobTypes() []string
-	Close() error
+	Stats() ([]GroupStat, error)
+	ForEach(ctx context.Context, groupID, status string, fn Fn) error
 }
 
 // Options represents optional queue configurations.
@@ -44,10 +42,7 @@ type Options struct {
 
 // Handler is invoked by the queue instance when an item is available for
 // execution or for validation when items are being enqueued.
-type Handler interface {
-	Handle(ctx context.Context, item Item) ([]byte, error)
-	Sanitize(ctx context.Context, item *Item) error
-}
+type Handler func(ctx context.Context, item Item) ([]byte, error)
 
 type Fn func(ctx context.Context, item Item) error
 
@@ -59,18 +54,20 @@ func (h HandlerFn) Sanitize(_ context.Context, _ *Item) error             { retu
 
 // Item represents an item on the queue.
 type Item struct {
-	ID          string    `json:"id"`
-	Type        string    `json:"type"`
-	Payload     string    `json:"payload"`
-	GroupID     string    `json:"group_id"`
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	Payload string `json:"payload"`
+	GroupID string `json:"group_id"`
+	Result  string `json:"result"`
+
+	// Retry related options.
 	Attempt     int       `json:"attempt"`
 	MaxAttempts int       `json:"max_attempts"`
 	NextAttempt time.Time `json:"next_attempt"`
-	Result      string    `json:"result"`
 }
 
-// Stats represents queue status break down by type.
-type Stats struct {
+// GroupStat represents queue status break down by type.
+type GroupStat struct {
 	GroupID string `json:"group_id" db:"group_id"`
 	Type    string `json:"type"`
 	Total   int    `json:"total"`
@@ -78,4 +75,10 @@ type Stats struct {
 	Pending int    `json:"pending"`
 	Failed  int    `json:"failed"`
 	Skipped int    `json:"skipped"`
+}
+
+type Stats struct {
+	Queue    string      `json:"queue"`
+	Groups   []GroupStat `json:"groups"`
+	JobTypes []string    `json:"job_types"`
 }

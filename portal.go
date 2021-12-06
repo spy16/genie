@@ -28,7 +28,7 @@ var (
 )
 
 // Router returns a new web portal handler.
-func Router(q Queue, customBanner ...string) http.Handler {
+func Router(q *Genie, customBanner ...string) http.Handler {
 	r := mux.NewRouter()
 	r.Handle("/", handleIndexGet(q, strings.Join(customBanner, "\n"))).Methods(http.MethodGet)
 	r.Handle("/", handleUpload(q)).Methods(http.MethodPost)
@@ -44,16 +44,16 @@ func handleFaviconGet() http.HandlerFunc {
 	}
 }
 
-func handleIndexGet(q Queue, banner string) http.HandlerFunc {
+func handleIndexGet(q *Genie, banner string) http.HandlerFunc {
 	return func(wr http.ResponseWriter, req *http.Request) {
 		d := map[string]interface{}{"banner": banner}
 		stats, err := q.Stats()
 		if err != nil {
 			d["error"] = fmt.Sprintf("stats unavailable: %v", err)
 		} else {
-			d["stats"] = doPercent(stats)
+			d["stats"] = doPercent(stats.Groups)
 		}
-		d["job_types"] = q.JobTypes()
+		d["job_types"] = q.jobTypes
 
 		if status := strings.TrimSpace(req.URL.Query().Get("status")); status != "" {
 			d["status"] = status
@@ -67,7 +67,7 @@ func handleIndexGet(q Queue, banner string) http.HandlerFunc {
 	}
 }
 
-func handleUpload(q Queue) http.HandlerFunc {
+func handleUpload(q *Genie) http.HandlerFunc {
 	return func(wr http.ResponseWriter, req *http.Request) {
 		if err := req.ParseMultipartForm(10 << 20); err != nil {
 			redirectErr(wr, req, err.Error())
@@ -96,7 +96,7 @@ func handleUpload(q Queue) http.HandlerFunc {
 			})
 		}
 
-		if err := q.Push(req.Context(), items...); err != nil {
+		if err := q.Push(req.Context(), items); err != nil {
 			redirectErr(wr, req, fmt.Sprintf("failed to stream-read upload (error: %v)", err))
 			return
 		}
@@ -105,7 +105,7 @@ func handleUpload(q Queue) http.HandlerFunc {
 	}
 }
 
-func downloadJobs(q Queue) http.Handler {
+func downloadJobs(q *Genie) http.Handler {
 	return http.HandlerFunc(func(wr http.ResponseWriter, req *http.Request) {
 		groupID := strings.TrimSpace(req.URL.Query().Get("group_id"))
 		status := strings.ToUpper(strings.TrimSpace(req.URL.Query().Get("status")))
@@ -141,7 +141,7 @@ func generateID(s string) string {
 	return hex.EncodeToString(sha[:10])
 }
 
-func doPercent(stats []Stats) []percentStat {
+func doPercent(stats []GroupStat) []percentStat {
 	result := make([]percentStat, len(stats), len(stats))
 	for i, stat := range stats {
 		result[i] = percentStat{

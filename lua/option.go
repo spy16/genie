@@ -86,11 +86,17 @@ func createExportsMap(structVal interface{}) map[string]interface{} {
 	switch rt.Kind() {
 	case reflect.Struct:
 		for i := 0; i < rt.NumField(); i++ {
-			res[rt.Field(i).Name] = rv.Field(i).Interface()
+			field := rt.Field(i)
+			if field.IsExported() {
+				res[field.Name] = rv.Field(i).Interface()
+			}
 		}
 
 		for i := 0; i < rt.NumMethod(); i++ {
-			res[rt.Method(i).Name] = rv.Method(i).Interface()
+			method := rt.Method(i)
+			if method.IsExported() {
+				res[rt.Method(i).Name] = rv.Method(i).Interface()
+			}
 		}
 
 	case reflect.Map:
