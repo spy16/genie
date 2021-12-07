@@ -48,6 +48,12 @@ func (l *Lua) Call(name string, args ...interface{}) (lua.LValue, error) {
 		return nil, fmt.Errorf("%s is not a function", name)
 	}
 
+	return l.CallFunc(lfn, args...)
+}
+
+// CallFunc invokes the given function value. Args are automatically converted to
+// appropriate types using the Luar library
+func (l *Lua) CallFunc(lfn *lua.LFunction, args ...interface{}) (lua.LValue, error) {
 	l.state.Push(lfn)
 	for _, arg := range args {
 		l.state.Push(luar.New(l.state, arg))

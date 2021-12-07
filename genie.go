@@ -3,13 +3,15 @@ package genie
 import (
 	"context"
 	"fmt"
-	"github.com/spy16/genie/lua"
-	gopherlua "github.com/yuin/gopher-lua"
+	libs "github.com/vadv/gopher-lua-libs"
 	"io"
-	"log"
 	"net/url"
 	"reflect"
 	"time"
+
+	"github.com/spy16/genie/lua"
+
+	gopherlua "github.com/yuin/gopher-lua"
 )
 
 // New returns a new initialised session of Genie.
@@ -22,7 +24,10 @@ func New(queueSpec string, initLua string, luaPaths []string) (*Genie, error) {
 	)
 	if err != nil {
 		return nil, err
-	} else if err := luaEngine.ExecuteFile(initLua); err != nil {
+	}
+	libs.Preload(luaEngine.State())
+
+	if err := luaEngine.ExecuteFile(initLua); err != nil {
 		return nil, err
 	}
 
@@ -54,10 +59,11 @@ func createQueue(queueSpec string) (Queue, error) {
 
 // Genie represents a Genie session.
 type Genie struct {
-	lua      *lua.Lua
-	queue    Queue
-	pollInt  time.Duration
-	jobTypes []string
+	lua         *lua.Lua
+	queue       Queue
+	pollInt     time.Duration
+	jobTypes    []string
+	jobHandlers map[string]Handler
 }
 
 // Stats returns stats about the current session and overall queue.
@@ -116,12 +122,13 @@ func (g *Genie) ForEach(ctx context.Context, groupID, status string, fn Fn) erro
 }
 
 func (g *Genie) popAndProcess(ctx context.Context) error {
-	processFn := func(ctx context.Context, item Item) ([]byte, error) {
-		log.Printf("processing one item: %+v", item)
-		return nil, nil
-	}
-
-	return g.queue.Pop(ctx, g.jobTypes, processFn)
+	return g.queue.Pop(ctx, g.jobTypes, func(ctx context.Context, item Item) ([]byte, error) {
+		h, found := g.jobHandlers[item.Type]
+		if !found {
+			return nil, fmt.Errorf("handler not found: %s", item.Type)
+		}
+		return h(ctx, item)
+	})
 }
 
 func (g *Genie) validate(item Item) error {
@@ -131,7 +138,17 @@ func (g *Genie) validate(item Item) error {
 type genieAPI struct{ g *Genie }
 
 func (api genieAPI) Register(name string, lf *gopherlua.LFunction) error {
+	if api.g.jobHandlers == nil {
+		api.g.jobHandlers = map[string]Handler{}
+	}
+
 	api.g.jobTypes = append(api.g.jobTypes, name)
-	log.Printf("name=%s, lf=%v", name, lf)
+	api.g.jobHandlers[name] = func(ctx context.Context, item Item) ([]byte, error) {
+		ret, err := api.g.lua.CallFunc(lf, item)
+		if err != nil {
+			return nil, err
+		}
+		return []byte(ret.String()), nil
+	}
 	return nil
 }
